@@ -15,6 +15,7 @@ import collections
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
+from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
 
 BASE_DIR = '/home/thanuja/Dropbox/capstone/raw_files'
 SUB_DIR = ['BGL','Hadoop','OpenStack']
@@ -71,7 +72,8 @@ def apply_sliding_window():
        sliding_window(OUTPUT_DIR + file)
 
 def sliding_window(csv_with_clusters):
-    CLUSTER_COL=3
+    CLUSTER_COL=4
+    LABEL_COL=3
     w = 100
     de = collections.deque([], w+1)
     k = 0
@@ -85,7 +87,7 @@ def sliding_window(csv_with_clusters):
             cluster = int(cluster_str)
             if cluster > k:
                 k = cluster
-    cluster_counts = [0]*(k+5)
+    cluster_counts = [0]*(k+6)
     outfile = csv_with_clusters.replace('clusters.csv', '_sliding_window.csv')
     with open(csv_with_clusters, 'r') as ip_file, open(outfile, 'w+') as sw_file:
         reader = csv.reader(ip_file)
@@ -101,16 +103,17 @@ def sliding_window(csv_with_clusters):
             cluster_counts[cluster] += 1
             if len(de) <= w:
                 continue
-            print('cluster_counts:',cluster_counts)
-            print('len', len(de))
+            #print('cluster_counts:',cluster_counts)
+            #print('len', len(de))
             row_old = de.popleft()
-            d_ts = row_old[1]-l_ts
+            d_ts = float(l_ts)-float(row_old[1])
             #    print('row_old: ',row_old)
             cluster_counts[int(row_old[CLUSTER_COL])] -= 1
             cluster_counts[-1]= l_ts
             cluster_counts[-2]= d_ts
             cluster_counts[-3]= lst_row[0]
             cluster_counts[-4]= row_old[0]
+            cluster_counts[-5]= lst_row[LABEL_COL]
             csvwriter.writerow(cluster_counts)
 
 def parse_hadoop_files(file_path, line):
@@ -201,17 +204,22 @@ def get_initial_clusters(csv_log_file):
     print('finding clusters for ', csv_log_file)
     csv_log_df = pd.read_csv(csv_log_file).dropna()
     outfile = os.path.splitext(csv_log_file)[0]+'clusters.csv'
-    tvec = TfidfVectorizer()
+    tvec = TfidfVectorizer(min_df=100)
     print(csv_log_df.head().text)
     tvec_weights = tvec.fit_transform(csv_log_df.text)
-    max_smallest_cluster_size = 100
+    print('tvec_vocab: ',len(tvec.get_feature_names_out()))
+    max_smallest_cluster_size = 10
     smallest_cluster_size = 1000
-    k = 2
+    k = 10
     while smallest_cluster_size > max_smallest_cluster_size:
-        kmeans = KMeans(n_clusters=k).fit(tvec_weights)
-        k+=1
+        kmeans = KMeans(n_clusters=k, n_init='auto').fit(tvec_weights)
+        dense_weights = tvec_weights[:100000].toarray()
+        labels = kmeans.predict(dense_weights)
+        ch_score = calinski_harabasz_score(dense_weights, labels)
+        db_score = davies_bouldin_score(dense_weights, labels)
         smallest_cluster_size = min(np.bincount(kmeans.labels_))
-        print(k, smallest_cluster_size, max_smallest_cluster_size)
+        print(k, smallest_cluster_size, max_smallest_cluster_size, 'ch', ch_score, 'db', db_score)
+        k+=10
         # print(kmeans.labels_)
     clusters_df = pd.DataFrame({'clusters': kmeans.labels_})       
     # print(clusters_df.head(10))
@@ -220,7 +228,8 @@ def get_initial_clusters(csv_log_file):
     result_df.to_csv(outfile, quoting=csv.QUOTE_NONNUMERIC)
     return outfile
 
+#get_initial_clusters(OUTPUT_DIR+'OpenStack'+'.csv')
 process_raw_files()
-#apply_sliding_window()
+apply_sliding_window()
 print('DONE')
    
