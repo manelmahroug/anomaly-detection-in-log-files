@@ -23,7 +23,9 @@ OUTPUT_DIR = '/home/thanuja/Dropbox/capstone/output/'
 WINDOW_SIZE = 100
 ANOMALY_DIR = '/home/thanuja/Dropbox/capstone/anomalies'
 
-
+# Anomalies for Hadoop are labeled based on the file name. Anomalies for
+# OpenStack are based on vm instance id. Create a set for both log types to
+# label anomalous log lines later.
 def mark_anomalies():
     hadoop_anomalies = set()
     open_stack_anomalies = set()
@@ -35,13 +37,17 @@ def mark_anomalies():
                 if 'Hadoop' in f_name:
                     for line in anomaly_file:
                         hadoop_anomalies.add(line.strip())
-                elif 'Openstack' in f_name:
+                elif 'OpenStack' in f_name:
                     for line in anomaly_file:
+                        if len(line.strip()) == 0:
+                            continue
                         open_stack_anomalies.add(line.strip())
     return hadoop_anomalies, open_stack_anomalies
 
             
 hadoop_anomalies, open_stack_anomalies = mark_anomalies()
+
+# parses timestamp and writes intial cluster CSVs
 def process_raw_files():
     shutil.rmtree(OUTPUT_DIR)
     os.makedirs(OUTPUT_DIR)
@@ -56,13 +62,12 @@ def process_raw_files():
                 file_name = os.path.join(root,file)
                 print(file_name)
                 app_sys_name = re.search(r'raw_files/([^/]+)/',file_name).group(1)
-                #if app_sys_name == 'Hadoop':
-                #    is_anomaly = [ele for ele in hadoop_anomalies if(ele in file_name)]
                 csvfile_with_ts = parse_ts(file_name, app_sys_name)
                 csvs_with_ts.add(csvfile_with_ts)
     for csvfile_with_ts in csvs_with_ts:
         get_initial_clusters(csvfile_with_ts)
 
+# process all cluster output files to create a sliding window file for each.
 def apply_sliding_window():
    out_files = os.listdir(OUTPUT_DIR)
    for file in out_files:
@@ -71,6 +76,8 @@ def apply_sliding_window():
        print(file)
        sliding_window(OUTPUT_DIR + file)
 
+# counts number of clusters in each window of the sliding window. Also record
+# the length of time of each window, and the row numbers of the original csv.
 def sliding_window(csv_with_clusters):
     CLUSTER_COL=4
     LABEL_COL=3
@@ -116,6 +123,7 @@ def sliding_window(csv_with_clusters):
             cluster_counts[-5]= lst_row[LABEL_COL]
             csvwriter.writerow(cluster_counts)
 
+# parse a single line of a hadoop log file
 def parse_hadoop_files(file_path, line):
     is_anomaly = False
     words = line.split(' ')
@@ -130,7 +138,7 @@ def parse_hadoop_files(file_path, line):
     remainder_ll = ' '.join(words)
     return epochts, remainder_ll, is_anomaly
 
-
+# parse a single line of an openstack log file
 def parse_openstack_files(file_path, line):
     words = line.split(' ')
     if len(words) < 2:
@@ -147,6 +155,7 @@ def parse_openstack_files(file_path, line):
             is_anomaly = True
     return epochts, remainder_ll, is_anomaly
 
+# parse a single line of a BGL log line
 def parse_bgl_files(file_path, line):
     is_anomaly = False
     words = line.split(' ')
@@ -167,6 +176,8 @@ def parse_bgl_files(file_path, line):
 
 parsers = {'Hadoop':parse_hadoop_files,'OpenStack':parse_openstack_files,'BGL':parse_bgl_files}
 
+# parse a raw log file. Log parsing specific to each log file is done in the
+# appropriate handler, such as parse_bgl_files.
 def parse_ts(file_name,app_sys_name):
     log_file = open(file_name, "r+")
     out_file = OUTPUT_DIR+app_sys_name+'.csv'
@@ -199,7 +210,9 @@ def parse_ts(file_name,app_sys_name):
             csvwriter.writerow([epochts,remainder_ll,is_anomaly])
     log_file.close()
     return out_file
-    
+
+# cluster the tfidf vectors for a each raw log line, to apply cluster labels that
+# correspond to the different types of log lines.
 def get_initial_clusters(csv_log_file):
     print('finding clusters for ', csv_log_file)
     csv_log_df = pd.read_csv(csv_log_file).dropna()
@@ -211,10 +224,12 @@ def get_initial_clusters(csv_log_file):
     max_smallest_cluster_size = 10
     smallest_cluster_size = 1000
     k = 10
+    # automatically determining optimal k. Repeat k-means until small_cluster_size < max_smallest_cluster_size
     while smallest_cluster_size > max_smallest_cluster_size:
-        kmeans = KMeans(n_clusters=k, n_init='auto').fit(tvec_weights)
+        kmeans = KMeans(n_clusters=k, n_init=5).fit(tvec_weights)
         dense_weights = tvec_weights[:100000].toarray()
         labels = kmeans.predict(dense_weights)
+        # print out some cluster metrics, which may be useful later.
         ch_score = calinski_harabasz_score(dense_weights, labels)
         db_score = davies_bouldin_score(dense_weights, labels)
         smallest_cluster_size = min(np.bincount(kmeans.labels_))
