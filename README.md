@@ -18,6 +18,7 @@ Shilin He, Jieming Zhu, Pinjia He, Michael R. Lyu. Loghub: A Large Collection of
 
 Information on BGL can be found [here](https://github.com/logpai/loghub/tree/master/BGL)<br>
 **Note**: the data in the _data folder_ is just a sample. The raw logs can be requested from Zenodo: https://doi.org/10.5281/zenodo.1144100 <br>
+
 Information on Thunderbird can be found [here](https://github.com/logpai/loghub/tree/master/Thunderbird)<br>
 **Note** the data in the _data folder_ is just a sample. The raw logs can be requested from Zenodo: https://doi.org/10.5281/zenodo.1144100
 
