@@ -17,7 +17,9 @@ BGL and Thunderbird data were used in this project. The data is provided by the 
 Shilin He, Jieming Zhu, Pinjia He, Michael R. Lyu. Loghub: A Large Collection of System Log Datasets towards Automated Log Analytics. Arxiv, 2020.
 
 Information on BGL can be found [here](https://github.com/logpai/loghub/tree/master/BGL)<br>
+**Note**: the data in the _data folder_ is just a sample. The raw logs can be requested from Zenodo: https://doi.org/10.5281/zenodo.1144100 <br>
 Information on Thunderbird can be found [here](https://github.com/logpai/loghub/tree/master/Thunderbird)<br>
+**Note** the data in the _data folder_ is just a sample. The raw logs can be requested from Zenodo: https://doi.org/10.5281/zenodo.1144100
 
 
 
