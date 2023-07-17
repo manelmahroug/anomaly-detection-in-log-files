@@ -9,13 +9,13 @@ Our approach is divided into two parts:
 1. Supervised Learning: framed as a classification task, we trained a logistic regression model, a gradient boosted tree, and an XGBoost model to classify log lines as normal or anomalous.
 2. Unsupervised Learning: in an attempt to detect anomalies in the log files, we made use of the K-means clustering algorith, one class SVM, and Isolation forest.
 
-**Data**
+## **Data** <br>
 BGL and Thunderbird data were used in this project. The data is provided by the Loghub collection:
 
 Shilin He, Jieming Zhu, Pinjia He, Michael R. Lyu. Loghub: A Large Collection of System Log Datasets towards Automated Log Analytics. Arxiv, 2020.
 
-Information on BGL can be found [here](https://github.com/logpai/loghub/tree/master/BGL)
-Information on Thunderbird can be found [here](https://github.com/logpai/loghub/tree/master/Thunderbird)
+Information on BGL can be found [here](https://github.com/logpai/loghub/tree/master/BGL)<br>
+Information on Thunderbird can be found [here](https://github.com/logpai/loghub/tree/master/Thunderbird)<br>
 
 
 
