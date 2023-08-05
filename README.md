@@ -26,4 +26,7 @@ Information on Thunderbird can be found [here](https://github.com/logpai/loghub/
 
 
 [1] Grover, Aarish, "Anomaly Detection for Application Log Data" (2018). Master's Projects. 635. DOI: https://doi.org/10.31979/etd.znsb-bw4d
-
+## **How to run the code** <br>
+*ad_feature_extraction.py* preprocesses the data and generates the features used in the supervised machine learning section of the project<br>
+*Supervised_learning* folder contains jupyter notebooks that detail the various supervised learning models we ran during the course of the project<br>
+*unsupervised_learning* folder contains jupyter notebooks that detail the various unsupervised learning models we ran during the course of the project
