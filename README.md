@@ -30,5 +30,6 @@ Information on Thunderbird can be found [here](https://github.com/logpai/loghub/
 *ad_feature_extraction.py* preprocesses the data and generates the features used in the supervised and unsupervised machine learning sections of the project. The input to this file is the data listed above <br>
 *Supervised_learning* folder contains the jupyter notebooks that detail the various supervised learning models we ran during the course of the project<br>
 *unsupervised_learning* folder contains jupyter notebooks that detail the various unsupervised learning models we ran during the course of the project
+*F1 Scores.ipynb* evaluates the performance of the previously selected models under various conditions
 *images* contains some of the visualizations and the code to generate them
 *data* contains **samples** of the processed data. To get the full dataset, run the *ad_feature_extraction.py* on the raw dataset
