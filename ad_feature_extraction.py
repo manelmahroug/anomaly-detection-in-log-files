@@ -13,39 +13,15 @@ import numpy as np
 import collections
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.cluster import KMeans, MiniBatchKMeans
-from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score, homogeneity_score
 import uuid
-import matplotlib.pyplot as plt
 import subprocess
 import random
 
-BASE_DIR = '/home/thanuja/Dropbox/capstone/raw_files'
-SUB_DIR = ['BGL','Hadoop','OpenStack','Thunderbird']
-OUTPUT_DIR = '/home/thanuja/Dropbox/capstone/output/'
+BASE_DIR = 'raw_files'
+OUTPUT_DIR = 'output/'
 WINDOW_SIZE = 100
-ANOMALY_DIR = '/home/thanuja/Dropbox/capstone/anomalies'
-
-# Anomalies for Hadoop are labeled based on the file name. Anomalies for
-# OpenStack are based on vm instance id. Creates a set for both log types to
-# label anomalous log lines later.
-def mark_anomalies():
-    hadoop_anomalies = set()
-    open_stack_anomalies = set()
-    for root, dirs, files in os.walk(ANOMALY_DIR):
-       for file in files:
-            f_name = os.path.join(root, file)
-            print(f_name)
-            with open(f_name, "r+") as anomaly_file:
-                if 'Hadoop' in f_name:
-                    for line in anomaly_file:
-                        hadoop_anomalies.add(line.strip())
-                elif 'OpenStack' in f_name:
-                    for line in anomaly_file:
-                        if len(line.strip()) == 0:
-                            continue
-                        open_stack_anomalies.add(line.strip())
-    return hadoop_anomalies, open_stack_anomalies
 
 def backup_output():
     backup_ext = str(uuid.uuid1())
@@ -65,8 +41,8 @@ def process_raw_files(split_test_train=False):
                 print(file_name)
                 app_sys_name = re.search(r'raw_files/([^/]+)/',file_name).group(1)
                 csvfile_with_ts = parse_ts_sample(file_name, app_sys_name)
-                #parse_timeline_data(file_name, app_sys_name)
-                #csvfile_with_ts = parse_ts(file_name, app_sys_name)
+                if not split_test_train:
+                    parse_timeline_data(file_name, app_sys_name)
                 csvs_with_ts.add(csvfile_with_ts)
     for csvfile_with_ts in csvs_with_ts:
         get_clusters(csvfile_with_ts, split_test_train=split_test_train)
@@ -125,13 +101,10 @@ def sliding_window(csv_with_clusters):
             lst_row_old = list(row_old.values())
             d_ts = float(row['timestamp'])-float(row_old['timestamp'])
             cluster_counts[int(row_old['cluster2'])] -= 1
-            #cluster_counts[-1]=lst_row[-2]
             cluster_counts[-1]=row['filename']
             cluster_counts[-2]= row['timestamp']
             cluster_counts[-3]= d_ts
-            #cluster_counts[-4]= lst_row[0]
             cluster_counts[-4]= lst_row[0]
-            #cluster_counts[-5]= row_old[0]
             cluster_counts[-5]= lst_row_old[0]
             # Precision label is just the label
             cluster_counts[-7]= row['label']
@@ -158,38 +131,6 @@ def sliding_window(csv_with_clusters):
                 else:
                     p_agg.append('')
             csvwriter.writerow(cluster_counts + p_agg)
-
-# parses a single line of a hadoop log file
-def parse_hadoop_files(file_path, line):
-    is_anomaly = False
-    words = line.split(' ')
-    if len(words) < 2:
-        raise ValueError()
-    folder_name = file_path[-2]
-    is_anomaly = folder_name in hadoop_anomalies
-    w1 = words.pop(0)
-    w2 = words.pop(0)
-    str_ts = w1+'-'+w2
-    epochts = datetime.strptime(str_ts,'%Y-%m-%d-%H:%M:%S,%f').timestamp()*1000        
-    remainder_ll = ' '.join(words)
-    return epochts, remainder_ll, is_anomaly, folder_name
-
-# parses a single line of an openstack log file
-def parse_openstack_files(file_path, line):
-    words = line.split(' ')
-    if len(words) < 2:
-        raise ValueError()
-    filename = words.pop(0)
-    w1 = words.pop(0)
-    w2 = words.pop(0)
-    str_ts = w1+'-'+w2
-    epochts = datetime.strptime(str_ts,'%Y-%m-%d-%H:%M:%S.%f').timestamp()*1000 
-    remainder_ll = ' '.join(words)
-    is_anomaly = False
-    for ele in open_stack_anomalies:
-        if ele in remainder_ll:
-            is_anomaly = True
-    return epochts, remainder_ll, is_anomaly, filename
 
 # parses a single line of a BGL log line
 def parse_bgl_files(file_path, line):
@@ -239,81 +180,7 @@ def parse_thunderbird_files(file_path, line):
     return epochts, remainder_ll, is_anomaly, machine
 
 
-parsers = {'Hadoop':parse_hadoop_files,'OpenStack':parse_openstack_files,'BGL':parse_bgl_files, 'Thunderbird':parse_thunderbird_files}
-
-# parses a raw log file. Log parsing specific to each log file is done in the
-# appropriate handler, such as parse_bgl_files.
-# write to the output file in a way that maintains anomaly percent of original file. Write an entire window at a time to preserve context.
-# this is done so that, anomalies always have context and to limit the data to make the model trainable.
-def parse_ts(file_name,app_sys_name):
-    num_anomalies = int(subprocess.run(['grep', '-cv', '^-', file_name], stdout=subprocess.PIPE).stdout)
-    num_normal = int(subprocess.run(['grep', '-c', '^-', file_name], stdout=subprocess.PIPE).stdout)
-    anomaly_target_percent = num_anomalies / (num_anomalies + num_normal)
-    # Some slack is needed otherwise algorithm rarely adds anomalous or non-anomalous rows
-    max_anomaly_percent = anomaly_target_percent * 1.1
-    min_anomaly_percent = anomaly_target_percent * 0.9
-    print('Found %d anomalies in %d lines for a target percentage of %f' % (num_anomalies, num_normal, anomaly_target_percent))
-    log_file = open(file_name, "r+", encoding="utf8", errors='ignore')
-    out_file = OUTPUT_DIR+app_sys_name+'.csv'
-    is_file = os.path.isfile(out_file)
-    csv_file = open(out_file, 'a+')
-    file_path = file_name.split('/')
-    min_lines = 100000
-    min_anomalies = 5000
-    
-    with csv_file, log_file:
-        csvwriter = csv.writer(csv_file, quoting=csv.QUOTE_NONNUMERIC, escapechar='\\')
-        if not is_file:
-            csvwriter.writerow(['timestamp','text','label','filename'])
-        count = 0
-        anomaly_output_count = 0
-        output_count = 0
-        remainder_ll = is_anomaly = filename = None
-        # make sure that 1/w > anomaly_target_percent, so that a single anomaly can
-        # increase current percentage even if no other anomalies are in current window
-        w = int(1/anomaly_target_percent/2)
-        de = collections.deque([], w+1)
-        for line in log_file:
-            line = line.rstrip('\n')
-            count+=1
-            if count%10000==0:
-                print("%d / %d / %d" % (anomaly_output_count, output_count, count))
-            if app_sys_name not in parsers:
-                raise ValueError("no parser found for " + app_sys_name)
-            run_parser = parsers[app_sys_name]
-            remainder_ll = ''
-            try:
-                epochts,remainder_ll,is_anomaly,filename = run_parser(file_path, line)
-            except ValueError:
-                # when the line does not follow the normal format, assume it is continuation of 
-                # previous log line. Errors than span multiple lines, are put together in a single line.
-                if len(de) > 0:
-                    epochts,remainder_ll,is_anomaly,filename = de.pop()
-                    de.append(epochts,remainder_ll+line,is_anomaly,filename)
-                continue
-            if len(remainder_ll.strip()) == 0:
-                continue
-            #csvwriter.writerow([epochts,line_out,is_anomaly,filename])
-            de.append((epochts, remainder_ll, is_anomaly,filename))
-            anomaly_percent = anomaly_output_count / (output_count + 1) # avoid division by 0
-            if is_anomaly and anomaly_percent < max_anomaly_percent:
-                for epochts, remainder_ll, window_anomaly,filename in de:
-                    csvwriter.writerow([epochts,remainder_ll,window_anomaly,filename])
-                    if window_anomaly: anomaly_output_count += 1
-                    output_count += 1
-                de.clear()
-            if not is_anomaly and anomaly_percent > min_anomaly_percent:
-                for epochts, remainder_ll, window_anomaly,filename in de:
-                    if window_anomaly: continue # don't add more anomalies here
-                    csvwriter.writerow([epochts,remainder_ll,window_anomaly,filename])
-                    output_count += 1
-                de.clear()
-            if output_count >= min_lines and anomaly_output_count >= min_anomalies:
-                print('Output %d lines, stopping %s' % (output_count, file_name))
-                break
-        print("ACTUAL ANOMALY PERCENTAGE: ", anomaly_output_count / output_count, anomaly_percent)
-    log_file.close()
-    return out_file
+parsers = {'BGL':parse_bgl_files, 'Thunderbird':parse_thunderbird_files}
 
 def simple_split(df):
     split_on = int(len(df.values)*0.80)
@@ -325,7 +192,7 @@ def simple_split(df):
 
 # cluster the tfidf vectors for a each raw log line, to apply cluster labels that
 # correspond to the different types of log lines.
-def get_clusters(csv_log_file, split_test_train=False):
+def get_clusters(csv_log_file, split_test_train=False, text_col='text'):
     print('finding clusters for ', csv_log_file)
     csv_log_df = pd.read_csv(csv_log_file).fillna('')
     csv_log_df.sort_values('timestamp', inplace=True)
@@ -349,43 +216,41 @@ def get_clusters(csv_log_file, split_test_train=False):
         out_train_file = os.path.splitext(csv_log_file)[0]+'_all_clusters.csv'
         out_test_file = ''
 
-    max_smallest_cluster_size = 20
+    max_smallest_cluster_size = 25
     
     tvec = TfidfVectorizer(min_df=max_smallest_cluster_size, tokenizer=simple_tokenizer)
-    #unique_rows_df = train_df.copy()
-    #unique_rows_df.text = unique_rows_df.text.replace('[0-9.]+', '', regex=True)
-    #unique_rows_df.drop_duplicates(subset=['text'], inplace=True)
-    #print(csv_log_file, train_df.size, 'rows has', unique_rows_df.size, 'unique rows')
-    print(train_df.text[:5])
-    tvec_weights_train = tvec.fit_transform(train_df.text)
+    print(train_df[text_col][:5])
+    tvec_weights_train = tvec.fit_transform(train_df[text_col])
     if split_test_train:
-        tvec_weights_test = tvec.transform(test_df.text)
+        tvec_weights_test = tvec.transform(test_df[text_col])
     print('tvec_vocab: ',len(tvec.get_feature_names_out()))
     smallest_cluster_size = 1000
-    max_rows = 200000
-    num_rows = tvec_weights_train.shape[0]
+
     best_score = 0
     best_kmeans = None
-    k = 10
-    if num_rows > max_rows:
-        tvec_weights_sample = tvec_weights_train[np.random.choice(num_rows, max_rows, replace=False), :]
-    else:
-        tvec_weights_sample = tvec_weights_train
+    best_homogeneity = 0
+    k = 20
+    y_sample = train_df['label'].values
+    tvec_weights_sample = tvec_weights_train
     # automatically determining optimal k. Repeat k-means until small_cluster_size < max_smallest_cluster_size
     while k < 100 or smallest_cluster_size > max_smallest_cluster_size:
-        #kmeans = KMeans(n_clusters=k, n_init=10, algorithm='elkan', random_state=0).fit(tvec_weights_sample)
         kmeans = MiniBatchKMeans(n_clusters=k, n_init=10, batch_size=10000, random_state=0).fit(tvec_weights_sample)
         labels = kmeans.predict(tvec_weights_sample)
         dense_weights = tvec_weights_sample.toarray()
         ch_score = calinski_harabasz_score(dense_weights, labels)
         db_score = davies_bouldin_score(dense_weights, labels)
         score = ch_score / (10000 * db_score * db_score)
+        homogeneity = homogeneity_score(y_sample, labels)
         if best_kmeans is None or best_score < score:
             best_score = score
             best_kmeans = kmeans
+            best_homogeneity = homogeneity
         smallest_cluster_size = min(np.bincount(kmeans.labels_))
-        print('k', k, 'smallest cluster', smallest_cluster_size, 'ch', ch_score, 'db', db_score, 'score', score)
+        print(csv_log_file, split_test_train, 'k', k, 'smallest cluster',
+              smallest_cluster_size, 'ch', ch_score, 'db', db_score, 'score', score,
+              'homogeneity', homogeneity)
         k=int(k*1.1)+1
+    print('best k', len(best_kmeans.cluster_centers_), 'best score', best_score, 'best homogeneity', best_homogeneity)
     train_labels = best_kmeans.predict(tvec_weights_train)
     clusters_train_df = pd.DataFrame({'clusters': train_labels})
     result_train_df = pd.concat([train_df, clusters_train_df], axis=1, join='inner')
@@ -397,16 +262,6 @@ def get_clusters(csv_log_file, split_test_train=False):
         result_test_df = pd.concat([test_df, clusters_test_df], axis=1, join='inner')
         result_test_df.to_csv(out_test_file, quoting=csv.QUOTE_NONNUMERIC)
     return out_train_file, out_test_file
-
-def dataset_balance():
-    out_files = os.listdir(OUTPUT_DIR)
-    for file in out_files:
-        if not file.endswith('_clusters.csv'):
-            continue
-        print(file)
-        cluster_df = pd.read_csv(OUTPUT_DIR + file).dropna()
-        cluster_df['label'].value_counts().plot.bar(title=file)
-        plt.show()
 
 def simple_tokenizer(line):
     for c in '[](){},':
@@ -445,8 +300,6 @@ def get_params_within_cluster():
                 count += 1
                 if count % 10000 == 0:
                     print(count)
-                #if count < 3: print(row["text"])
-                #print('index',index, row)
                 for j, word in enumerate(words):
                     # Remove if it has any digits. Assume all character words are meaningful.
                     if word in tfidf_filter.vocabulary_: # and bool(re.search(r'\d', word)):
@@ -467,7 +320,6 @@ def get_params_within_cluster():
                         continue
                     if word in tfidf_extractor.vocabulary_:
                         cluster_df.at[index, "p-"+str(i)+"-"+str(p)] = word
-                        #if count < 3: print('\tFound param "%s" in row %d at position %d(p=%d) in cluster %d' % (word, row[0], j, p, i))
                         p += 1
 
         outfile = OUTPUT_DIR + file.replace('_clusters.csv', '_params.csv')
@@ -508,8 +360,6 @@ def parse_ts_sample(file_name, app_sys_name):
             if r > total_output_percentage:
                 lines = []
                 continue
-            #print(r, total_output_percentage)
-            #print(r)
             prev = None
             for block_line in lines:
                 try:
@@ -572,7 +422,8 @@ def parse_timeline_data(file_name, app_sys_name):
 def redo_clusters():
     cluster_files = os.listdir(OUTPUT_DIR)
     for file in cluster_files:
-        if not file.endswith('_all_params.csv'):
+        suffix = '_all_params.csv'
+        if not file.endswith(suffix):
             continue
         print(file)
         cluster_df = pd.read_csv(OUTPUT_DIR + file,index_col=[0])
@@ -587,7 +438,6 @@ def redo_clusters():
         k = num_clusters - 5
         # automatically determining optimal k. Repeat k-means until small_cluster_size < max_smallest_cluster_size
         while k < num_clusters + 5:
-            #kmeans = KMeans(n_clusters=k, n_init=10, algorithm='elkan', random_state=0).fit(tvec_weights_sample)
             kmeans = MiniBatchKMeans(n_clusters=k, n_init=10, batch_size=10000, random_state=0).fit(X_tfidf)
             labels = kmeans.predict(X_tfidf)
             if X_tfidf.shape[0] > 50000:
@@ -611,24 +461,17 @@ def redo_clusters():
         cluster_seq = kmeans.predict(X_tfidf)
         cluster_df['cluster2'] = cluster_seq
         
-        outfile = OUTPUT_DIR + file.replace('_all_params.csv', '_clusters2.csv')
+        outfile = OUTPUT_DIR + file.replace(suffix, '_clusters2.csv')
         cluster_df.to_csv(outfile, quoting=csv.QUOTE_NONNUMERIC)
-
 
 if __name__ == '__main__':
     random.seed(0)
-    #hadoop_anomalies, open_stack_anomalies = mark_anomalies()
 
-    #get_clusters(OUTPUT_DIR+'BGL_all_params.csv')
-    #parse_ts_sample('/home/thanuja/Dropbox/capstone/raw_files/BGL/BGL.log','BGL')
-    #parse_timeline_data('/home/thanuja/Dropbox/capstone/raw_files/BGL/BGL.log','BGL')
-    #parse_timeline_data('/home/thanuja/Dropbox/capstone/raw_files/Thunderbird/Thunderbird.log','Thunderbird')
-    #backup_output()
-    #process_raw_files(split_test_train=False) # for unsupervised training
-    #process_raw_files(split_test_train=True) # for supervised training
-    #get_params_within_cluster()
-    #redo_clusters()
+    backup_output()
+    process_raw_files(split_test_train=False) # for unsupervised training
+    process_raw_files(split_test_train=True) # for supervised training
+    get_params_within_cluster()
+    redo_clusters()
     apply_sliding_window()
-    
-    #dataset_balance()
+
     print('DONE')
